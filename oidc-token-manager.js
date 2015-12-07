@@ -524,6 +524,21 @@ TokenManager.prototype.redirectForLogout = function () {
     });
 }
 
+TokenManager.prototype.redirectForLogoutCordova = function (browserSettings) {
+    browserSettings = browserSettings || {};
+    browserSettings.target = "_blank" // wont work with '_self' or '_system'
+    browserSettings.options = browserSettings.options || 'location=no,toolbar=yes';
+
+    var mgr = this;
+    
+    mgr.oidcClient.createLogoutRequestAsync(mgr.id_token).then(function (url) {
+      mgr.removeToken();
+      cordova.InAppBrowser.open(url, browserSettings.target, browserSettings.options);
+    }, function (err) {
+        console.error("TokenManager.redirectForLogout error: " + (err && err.message || err || ""));
+    });
+}
+
 TokenManager.prototype.processTokenCallbackAsync = function (queryString) {
     var mgr = this;
     return mgr.oidcClient.processResponseAsync(queryString).then(function (token) {
