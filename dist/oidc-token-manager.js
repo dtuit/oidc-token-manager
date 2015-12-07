@@ -8836,11 +8836,83 @@ TokenManager.prototype.redirectForToken = function () {
     });
 }
 
+TokenManager.prototype.redirectForTokenCordova = function (browserSettings) {
+    browserSettings = browserSettings || {};
+    browserSettings.target = "_blank" // wont work with '_self' or '_system'
+    browserSettings.options = browserSettings.options || 'location=no,toolbar=yes,clearsessioncache=yes,clearcache=yes';
+
+    var mgr = this;
+    var settings = copy(mgr._settings);
+        settings.redirect_uri = settings.popup_redirect_uri || settings.redirect_uri;
+    var oidc = new OidcClient(settings);
+
+    function isInAppBrowserInstalled(cordovaMetadata) {
+        return ["cordova-plugin-inappbrowser", "org.apache.cordova.inappbrowser"].some(function (name) {
+            return cordovaMetadata.hasOwnProperty(name)
+        })
+    }
+
+    if (!window.cordova) {
+        return _promiseFactory.reject("cordova is undefined")
+    }
+    
+    var cordovaMetadata = window.cordova.require("cordova/plugin_list").metadata;
+    if (isInAppBrowserInstalled(cordovaMetadata) === false) {
+        return _promiseFactory.reject("InAppBrowser plugin not found")
+    }
+
+    return _promiseFactory.create(function (resolve, reject) {
+        oidc.createTokenRequestAsync().then(function (request) {
+            var ref = cordova.InAppBrowser.open(request.url, browserSettings.target, browserSettings.options);
+
+            var exitCallback = function (event) {
+                console.error("The login flow was cancelled")
+                reject(Error("The login flow was cancelled"))
+            }
+            ref.addEventListener('exit', exitCallback);
+
+            ref.addEventListener('loadstart', function (event) {
+                if ((event.url).indexOf(settings.redirect_uri) === 0) {
+                    ref.removeEventListener("exit", exitCallback);
+                    ref.close();
+                    var hash = event.url.split('#')[1];
+
+                    oidc.processResponseAsync(hash).then(
+                        function (token) {
+                            mgr.saveToken(token);
+                            resolve();
+                        }, function (err) {
+                            reject(err);
+                        });
+                }
+            });
+        }, function (err) {
+            console.error("TokenManager.redirectForToken error: " + (err && err.message || err || ""));
+            reject(err)
+        })
+    });
+}
+
 TokenManager.prototype.redirectForLogout = function () {
     var mgr = this;
     mgr.oidcClient.createLogoutRequestAsync(mgr.id_token).then(function (url) {
         mgr.removeToken();
         window.location = url;
+    }, function (err) {
+        console.error("TokenManager.redirectForLogout error: " + (err && err.message || err || ""));
+    });
+}
+
+TokenManager.prototype.redirectForLogoutCordova = function (browserSettings) {
+    browserSettings = browserSettings || {};
+    browserSettings.target = "_blank" // wont work with '_self' or '_system'
+    browserSettings.options = browserSettings.options || 'location=no,toolbar=yes';
+
+    var mgr = this;
+    
+    mgr.oidcClient.createLogoutRequestAsync(mgr.id_token).then(function (url) {
+      mgr.removeToken();
+      cordova.InAppBrowser.open(url, browserSettings.target, browserSettings.options);
     }, function (err) {
         console.error("TokenManager.redirectForLogout error: " + (err && err.message || err || ""));
     });
@@ -8855,7 +8927,11 @@ TokenManager.prototype.processTokenCallbackAsync = function (queryString) {
 
 TokenManager.prototype.renewTokenSilentAsync = function () {
     var mgr = this;
-
+    
+    if(mgr._settings.is_cordova){
+        return mgr.renewTokenSilentAsyncCordova();
+    }
+    
     if (!mgr._settings.silent_redirect_uri) {
         return _promiseFactory.reject("silent_redirect_uri not configured");
     }
@@ -8872,6 +8948,43 @@ TokenManager.prototype.renewTokenSilentAsync = function () {
                 mgr.saveToken(token);
             });
         });
+    });
+}
+
+TokenManager.prototype.renewTokenSilentAsyncCordova = function(){
+    var mgr = this;
+    
+    if (!mgr._settings.silent_redirect_uri) {
+        return _promiseFactory.reject("silent_redirect_uri not configured");
+    }
+    
+    var settings = copy(mgr._settings);
+    settings.redirect_uri = settings.silent_redirect_uri;
+    settings.prompt = "none";
+    var oidc = new OidcClient(settings);
+    
+    return _promiseFactory.create(function (resolve, reject) {
+        oidc.createTokenRequestAsync().then(function (request) {
+            var ref = cordova.InAppBrowser.open(request.url, "_blank", "hidden=yes");
+            ref.addEventListener('loadstart', function (event) {
+                if ((event.url).indexOf(settings.redirect_uri) === 0) {
+                    ref.close();
+                    var hash = event.url.split('#')[1];
+
+                    oidc.processResponseAsync(hash).then(
+                        function (token) {
+                            mgr.saveToken(token);
+                            console.log("silent token renew successful")
+                            resolve();
+                        }, function (err) {
+                            reject(err);
+                        });
+                }
+            });
+        }, function (err) {
+            console.error("TokenManager.redirectForToken error: " + (err && err.message || err || ""));
+            reject(err)
+        })
     });
 }
 
