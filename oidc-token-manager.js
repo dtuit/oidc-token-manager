@@ -533,7 +533,11 @@ TokenManager.prototype.processTokenCallbackAsync = function (queryString) {
 
 TokenManager.prototype.renewTokenSilentAsync = function () {
     var mgr = this;
-
+    
+    if(mgr._settings.is_cordova){
+        return mgr.renewTokenSilentAsyncCordova();
+    }
+    
     if (!mgr._settings.silent_redirect_uri) {
         return _promiseFactory.reject("silent_redirect_uri not configured");
     }
