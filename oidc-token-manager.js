@@ -553,6 +553,43 @@ TokenManager.prototype.renewTokenSilentAsync = function () {
     });
 }
 
+TokenManager.prototype.renewTokenSilentAsyncCordova = function(){
+    var mgr = this;
+    
+    if (!mgr._settings.silent_redirect_uri) {
+        return _promiseFactory.reject("silent_redirect_uri not configured");
+    }
+    
+    var settings = copy(mgr._settings);
+    settings.redirect_uri = settings.silent_redirect_uri;
+    settings.prompt = "none";
+    var oidc = new OidcClient(settings);
+    
+    return _promiseFactory.create(function (resolve, reject) {
+        oidc.createTokenRequestAsync().then(function (request) {
+            var ref = cordova.InAppBrowser.open(request.url, "_blank", "hidden=yes");
+            ref.addEventListener('loadstart', function (event) {
+                if ((event.url).indexOf(settings.redirect_uri) === 0) {
+                    ref.close();
+                    var hash = event.url.split('#')[1];
+
+                    oidc.processResponseAsync(hash).then(
+                        function (token) {
+                            mgr.saveToken(token);
+                            console.log("silent token renew successful")
+                            resolve();
+                        }, function (err) {
+                            reject(err);
+                        });
+                }
+            });
+        }, function (err) {
+            console.error("TokenManager.redirectForToken error: " + (err && err.message || err || ""));
+            reject(err)
+        })
+    });
+}
+
 TokenManager.prototype.processTokenCallbackSilent = function (hash) {
     if (window.parent && window !== window.parent) {
         var hash = hash || window.location.hash;
